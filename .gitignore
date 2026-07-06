@@ -1,0 +1,54 @@
+# Build artifacts
+build/
+build_linux/
+*.o
+*.obj
+*.exe
+*.dll
+*.a
+*.so
+*.dylib
+
+# IDE
+.vs/
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# CMake
+CMakeFiles/
+CMakeCache.txt
+cmake_install.cmake
+CTestTestfile.cmake
+Makefile
+*.cmake
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+.eggs/
+
+# Compressed files
+*.zip
+*.7z
+*.tar.gz
+
+# MinGW toolchain (local only)
+mingw64/
+
+# Third-party dependencies (download on build)
+phase1_gemm/third_party/
+
+# VSCode CodeBuddy
+.codebuddy/
+
+# MSYS2 (local toolchain)
+msys64/
