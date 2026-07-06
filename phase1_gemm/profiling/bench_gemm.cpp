@@ -1,6 +1,7 @@
 #include "gemm_naive.h"
 #include "gemm_tiled.h"
 #include "gemm_simd.h"
+#include "gemm_simd_unroll.h"
 #include "timer.h"
 #include <cstdio>
 #include <random>
@@ -165,13 +166,13 @@ int main() {
     int sizes[] = {64, 128, 256, 512, 1024};
 
     // Print table header
-    printf("%-8s | %-8s %-8s | %-8s %-8s | %-8s %-8s | %-8s %-8s | %-10s\n",
+    printf("%-8s | %-8s %-8s | %-8s %-8s | %-8s %-8s | %-8s %-8s | %-8s %-8s | %-10s\n",
            "size", "ijk", "GFLOPS", "ikj", "GFLOPS",
-           "tiled", "GFLOPS", "simd", "GFLOPS", "best/peak%");
+           "tiled", "GFLOPS", "simd", "GFLOPS", "unroll", "GFLOPS", "best/peak%");
     printf("%.120s\n",
            "--------------------------------------------------"
            "--------------------------------------------------"
-           "------------------------------");
+           "--------------------------------------------------");
 
     for (int sz : sizes) {
         int M = sz, N = sz, K = sz;
@@ -183,22 +184,25 @@ int main() {
         double ms_ikj = bench_once(M, N, K, A, B, C, gemm_naive_ikj);
         double ms_tiled = bench_tiled(M, N, K, A, B, C, 32, 32, 32);
         double ms_simd = bench_once(M, N, K, A, B, C, gemm_simd);
+        double ms_unroll = bench_once(M, N, K, A, B, C, gemm_simd_unroll);
 
         double gflops_ijk = compute_gflops(sz, sz, sz, ms_ijk);
         double gflops_ikj = compute_gflops(sz, sz, sz, ms_ikj);
         double gflops_tiled = compute_gflops(sz, sz, sz, ms_tiled);
         double gflops_simd = compute_gflops(sz, sz, sz, ms_simd);
+        double gflops_unroll = compute_gflops(sz, sz, sz, ms_unroll);
 
         // Take best GFLOPS among all implementations for efficiency
-        double best_gflops = std::max({gflops_ijk, gflops_ikj, gflops_tiled, gflops_simd});
+        double best_gflops = std::max({gflops_ijk, gflops_ikj, gflops_tiled, gflops_simd, gflops_unroll});
         double efficiency = best_gflops / peak * 100.0;
 
-        printf("%-8d | %-8.2f %-8.2f | %-8.2f %-8.2f | %-8.2f %-8.2f | %-8.2f %-8.2f | %-9.1f%%\n",
+        printf("%-8d | %-8.2f %-8.2f | %-8.2f %-8.2f | %-8.2f %-8.2f | %-8.2f %-8.2f | %-8.2f %-8.2f | %-9.1f%%\n",
                sz,
                ms_ijk, gflops_ijk,
                ms_ikj, gflops_ikj,
                ms_tiled, gflops_tiled,
                ms_simd, gflops_simd,
+               ms_unroll, gflops_unroll,
                efficiency);
     }
 

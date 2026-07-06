@@ -2,6 +2,7 @@
 #include "gemm_naive.h"
 #include "gemm_tiled.h"
 #include "gemm_simd.h"
+#include "gemm_simd_unroll.h"
 #include <vector>
 #include <cmath>
 #include <random>
@@ -124,5 +125,41 @@ TEST(GemmTest, SIMD_NonMultipleOf8) {
     for (int i = 0; i < M * N; ++i) {
         EXPECT_NEAR(C_test[i], C_ref[i], 1e-3f)
             << "SIMD (non-multiple-of-8) mismatch at index " << i;
+    }
+}
+
+// Test 4x-unrolled SIMD version matches reference
+TEST(GemmTest, SIMD_Unroll_MatchesReference) {
+    const int M = 64, N = 64, K = 64;  // N is multiple of 8 and 32
+    std::vector<float> A(M * K), B(K * N), C_test(M * N), C_ref(M * N);
+
+    for (int i = 0; i < M * K; ++i) A[i] = (float)(i % 7) * 0.1f - 0.3f;
+    for (int i = 0; i < K * N; ++i) B[i] = (float)(i % 5) * 0.1f - 0.2f;
+
+    reference_gemm(M, N, K, A, B, C_ref);
+    gemm_simd_unroll(M, N, K, A, B, C_test);
+
+    for (int i = 0; i < M * N; ++i) {
+        EXPECT_NEAR(C_test[i], C_ref[i], 1e-4f)
+            << "SIMD-Unroll mismatch at index " << i;
+    }
+}
+
+// Test unrolled SIMD with non-multiple-of-32 sizes (tests 2x + scalar tail)
+TEST(GemmTest, SIMD_Unroll_NonMultipleOf32) {
+    const int M = 70, N = 50, K = 90;  // 50 is NOT 32-aligned, tests 2x tail + scalar
+    std::vector<float> A(M * K), B(K * N), C_test(M * N), C_ref(M * N);
+
+    std::mt19937 rng(42);
+    std::uniform_real_distribution<float> dist(-1.0f, 1.0f);
+    for (auto& x : A) x = dist(rng);
+    for (auto& x : B) x = dist(rng);
+
+    reference_gemm(M, N, K, A, B, C_ref);
+    gemm_simd_unroll(M, N, K, A, B, C_test);
+
+    for (int i = 0; i < M * N; ++i) {
+        EXPECT_NEAR(C_test[i], C_ref[i], 1e-3f)
+            << "SIMD-Unroll (non-32-aligned) mismatch at index " << i;
     }
 }

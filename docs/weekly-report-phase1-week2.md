@@ -177,25 +177,117 @@ GoogleTest 5/5 全部通过：
 
 ---
 
-## 七、下一步计划
+## 七、perf 指令级热点分析（新增）
 
-| 优先级 | 任务 | 预期收益 |
-|--------|------|----------|
-| P0 | SIMD + 数据打包 (packing) 组合优化 | 可能超越编译器向量化 |
-| P1 | 多线程 (OpenMP) 并行化 | 4P-core = ~4x 理论加速 |
-| P2 | 软件预取 (prefetch) | 隐藏 L2 miss 延迟 |
-| P3 | 寄存器分块 (micro-kernel) | 接近 OpenBLAS 水平 |
+### 7.1 方法
+
+使用 WSL2 的 `perf record -e cpu-clock` + `perf report` + `perf annotate` 进行指令级热点分析。WSL2 内核不支持硬件 PMU 计数器（`<not supported>`），改用软件时钟采样。
+
+### 7.2 ikj 函数热点指令
+
+```
+7.69%   vmovups (%rdx,%rcx),%ymm0       ← load B (连续访问，cache 友好)
+29.88%  vfmadd213ps (%rax,%rcx),%ymm2,%ymm0  ← FMA: load C + 乘 + 加
+28.17%  vmovups %ymm0,(%rax,%rcx)       ← store C
+31.73%  add $0x20,%rcx                  ← 循环计数器
+1.58%   cmp %rcx,%rdi                   ← 循环判断
+```
+
+### 7.3 关键发现
+
+1. **编译器已自动向量化**：`vmovups` 和 `vfmadd213ps` 是 AVX2 指令，GCC 已把 ikj 标量循环转成了 SIMD
+2. **循环控制开销 33.3%**（add 31.7% + cmp 1.6%）：每 3 个 CPU 周期有 1 个花在"判断循环是否继续"上
+3. **内存访问健康**：B 的 load 仅占 7.7%，说明连续访问的 cache 命中率高
+4. **手写 SIMD 不会更快**：编译器已经生成了最优的 SIMD 指令序列
 
 ---
 
-## 八、附录：运行命令
+## 八、循环展开优化（新增）
+
+### 8.1 原理
+
+基于 perf annotate 发现循环控制开销占 33%，实施 4x 循环展开：
+- 改前：每 8 个 float 做一次 add+cmp+jne（33% 开销）
+- 改后：每 32 个 float 做一次 add+cmp+jne（~8% 开销）
+
+### 8.2 实现
+
+新增文件：
+- `src/gemm_simd_unroll.h` — 接口声明
+- `src/gemm_simd_unroll.cpp` — 4x 展开实现
+
+结构：4 个连续的 FMA 块 + 2x 尾循环（处理 8≤剩余<32）+ 标量尾循环（剩余<8）
+
+### 8.3 正确性验证
+
+GoogleTest 7/7 全部通过（新增 2 tests）：
+- `SIMD_Unroll_MatchesReference`：N=64 (32 对齐)，误差 < 1e-4
+- `SIMD_Unroll_NonMultipleOf32`：N=50 (非 32 对齐)，误差 < 1e-3
+
+### 8.4 性能对比
+
+| size | simd GFLOPS | unroll GFLOPS | unroll/simd | 分析 |
+|------|------------|--------------|-------------|------|
+| 64 | 11.40 | **13.44** | **1.18x** | ✅ +18%，小矩阵在 L1，计算瓶颈 |
+| 128 | 20.26 | 20.36 | 1.01x | ≈ 持平，内存带宽瓶颈掩盖收益 |
+| 256 | 23.21 | **24.44** | **1.05x** | ✅ +5% |
+| 512 | 21.69 | **23.20** | **1.07x** | ✅ +7% |
+| 1024 | 15.70 | **18.18** | **1.16x** | ✅ +16% |
+
+### 8.5 结论
+
+- 循环展开在手写 SIMD 上有效（+5~18%）
+- 但编译器自动向量化的 **ikj 仍然是综合最优**（23-37 GFLOPS vs unroll 13-24 GFLOPS）
+- 手写 SIMD 额外 load/store C 的开销抵消了部分展开收益
+- 下一步应探索：**循环展开 + 寄存器分块（减少 C 的 load/store 次数）**
+
+---
+
+## 九、完整性能汇总（含全部 5 种实现）
+
+| size | ijk | ikj | tiled(32) | simd | unroll | best | peak% |
+|------|-----|-----|-----------|------|--------|------|-------|
+| 64 | 2.32 | 12.19 | 9.20 | 11.40 | 13.44 | **13.44** | 19.1% |
+| 128 | 3.29 | **23.43** | 19.24 | 20.26 | 20.36 | 23.43 | 33.3% |
+| 256 | 2.88 | **35.54** | 22.09 | 23.21 | 24.44 | 35.54 | 50.5% |
+| 512 | 2.76 | **36.64** | 20.16 | 21.69 | 23.20 | 36.64 | 52.0% |
+| 1024 | 0.61 | **21.83** | 18.05 | 15.70 | 18.18 | 21.83 | 31.0% |
+
+## 十、项目文件变更（更新）
+
+| 文件 | 变更类型 | 说明 |
+|------|----------|------|
+| `src/gemm_simd.h` | 新增 | SIMD 接口声明 |
+| `src/gemm_simd.cpp` | 新增 | AVX2 intrinsics 实现 |
+| `src/gemm_simd_unroll.h` | 新增 | 4x 循环展开接口声明 |
+| `src/gemm_simd_unroll.cpp` | 新增 | 4x 循环展开实现 |
+| `profiling/bench_gemm.cpp` | 修改 | 加入 SIMD + unroll 测试列 + block size 扫描 |
+| `tests/test_gemm.cpp` | 修改 | 加入 4 个新测试 (SIMD + unroll) |
+| `CMakeLists.txt` | 修改 | 加入 gemm_simd.cpp + gemm_simd_unroll.cpp |
+
+## 十一、下一步计划
+
+| 优先级 | 任务 | 预期收益 |
+|--------|------|----------|
+| P0 | 多线程 (OpenMP) 并行化 | 4P-core = ~4x 理论加速 |
+| P1 | 循环展开 + 寄存器分块（micro-kernel） | 减少 C 的 load/store，接近 OpenBLAS |
+| P2 | 数据打包 (packing) | 配合 micro-kernel 提升 SIMD 效率 |
+| P3 | 软件预取 (prefetch) | 隐藏 L2 miss 延迟 |
+
+## 十二、附录：运行命令
 
 ```powershell
-# 完整 benchmark（含 SIMD + block size 扫描）
+# 完整 benchmark（含 5 种实现 + block size 扫描）
 $env:Path = "C:\mingw64\bin;$env:Path"
 cd phase1_gemm\build
 .\bench_gemm.exe
 
-# 正确性测试（含 SIMD）
+# 正确性测试（7 tests）
 .\test_gemm.exe
+
+# WSL2 perf 热点分析
+cd phase1_gemm/build_linux
+perf record -e cpu-clock ./bench_gemm
+perf report --stdio --sort=overhead,symbol | head -20
+perf annotate gemm_naive_ikj
 ```

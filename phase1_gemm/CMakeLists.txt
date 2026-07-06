@@ -39,6 +39,7 @@ add_executable(bench_gemm
     src/gemm_naive.cpp
     src/gemm_tiled.cpp
     src/gemm_simd.cpp
+    src/gemm_simd_unroll.cpp
 )
 target_link_libraries(bench_gemm PRIVATE Threads::Threads)
 
@@ -49,6 +50,7 @@ if(BUILD_TESTS)
         src/gemm_naive.cpp
         src/gemm_tiled.cpp
         src/gemm_simd.cpp
+        src/gemm_simd_unroll.cpp
     )
     target_link_libraries(test_gemm PRIVATE gtest_main)
     enable_testing()
