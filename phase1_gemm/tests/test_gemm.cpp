@@ -3,6 +3,7 @@
 #include "gemm_tiled.h"
 #include "gemm_simd.h"
 #include "gemm_simd_unroll.h"
+#include "gemm_parallel.h"
 #include <vector>
 #include <cmath>
 #include <random>
@@ -161,5 +162,43 @@ TEST(GemmTest, SIMD_Unroll_NonMultipleOf32) {
     for (int i = 0; i < M * N; ++i) {
         EXPECT_NEAR(C_test[i], C_ref[i], 1e-3f)
             << "SIMD-Unroll (non-32-aligned) mismatch at index " << i;
+    }
+}
+
+// Test parallel ikj matches reference
+TEST(GemmTest, Parallel_IKJ_MatchesReference) {
+    const int M = 128, N = 128, K = 128;
+    std::vector<float> A(M * K), B(K * N), C_test(M * N), C_ref(M * N);
+
+    std::mt19937 rng(42);
+    std::uniform_real_distribution<float> dist(-1.0f, 1.0f);
+    for (auto& x : A) x = dist(rng);
+    for (auto& x : B) x = dist(rng);
+
+    reference_gemm(M, N, K, A, B, C_ref);
+    gemm_parallel_ikj(M, N, K, A, B, C_test);
+
+    for (int i = 0; i < M * N; ++i) {
+        EXPECT_NEAR(C_test[i], C_ref[i], 1e-3f)
+            << "Parallel-IKJ mismatch at index " << i;
+    }
+}
+
+// Test parallel tiled matches reference
+TEST(GemmTest, Parallel_Tiled_MatchesReference) {
+    const int M = 256, N = 256, K = 256;
+    std::vector<float> A(M * K), B(K * N), C_test(M * N), C_ref(M * N);
+
+    std::mt19937 rng(42);
+    std::uniform_real_distribution<float> dist(-1.0f, 1.0f);
+    for (auto& x : A) x = dist(rng);
+    for (auto& x : B) x = dist(rng);
+
+    reference_gemm(M, N, K, A, B, C_ref);
+    gemm_parallel_tiled(M, N, K, A, B, C_test);
+
+    for (int i = 0; i < M * N; ++i) {
+        EXPECT_NEAR(C_test[i], C_ref[i], 1e-3f)
+            << "Parallel-Tiled mismatch at index " << i;
     }
 }

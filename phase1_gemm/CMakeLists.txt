@@ -30,8 +30,15 @@ endif()
 # 头文件搜索路径
 include_directories(${CMAKE_SOURCE_DIR}/src)
 
-# 线程库（std::thread、后续 OpenMP 需要）
+# 线程库（std::thread、OpenMP 需要）
 find_package(Threads REQUIRED)
+find_package(OpenMP)
+if(OpenMP_CXX_FOUND)
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${OpenMP_CXX_FLAGS}")
+    message(STATUS "OpenMP enabled")
+else()
+    message(WARNING "OpenMP not found, parallel GEMM will not compile")
+endif()
 
 # --- benchmark 可执行文件 ---
 add_executable(bench_gemm
@@ -40,8 +47,9 @@ add_executable(bench_gemm
     src/gemm_tiled.cpp
     src/gemm_simd.cpp
     src/gemm_simd_unroll.cpp
+    src/gemm_parallel.cpp
 )
-target_link_libraries(bench_gemm PRIVATE Threads::Threads)
+target_link_libraries(bench_gemm PRIVATE Threads::Threads OpenMP::OpenMP_CXX)
 
 # --- 单元测试（需要 BUILD_TESTS=ON）---
 if(BUILD_TESTS)
@@ -51,8 +59,9 @@ if(BUILD_TESTS)
         src/gemm_tiled.cpp
         src/gemm_simd.cpp
         src/gemm_simd_unroll.cpp
+        src/gemm_parallel.cpp
     )
-    target_link_libraries(test_gemm PRIVATE gtest_main)
+    target_link_libraries(test_gemm PRIVATE gtest_main OpenMP::OpenMP_CXX)
     enable_testing()
     include(GoogleTest)
     gtest_discover_tests(test_gemm)

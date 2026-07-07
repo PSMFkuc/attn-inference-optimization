@@ -2,6 +2,7 @@
 #include "gemm_tiled.h"
 #include "gemm_simd.h"
 #include "gemm_simd_unroll.h"
+#include "gemm_parallel.h"
 #include "timer.h"
 #include <cstdio>
 #include <random>
@@ -152,7 +153,11 @@ static double bench_tiled(int M, int N, int K,
 
 int main() {
     // --- Environment setup ---
-    pin_to_pcore();          // Pin to P-core to avoid scheduling jitter
+    // Note: Do NOT pin process to single core when testing multi-threaded code.
+    // pin_to_pcore() restricts the entire process to core 0, which forces
+    // all OpenMP threads to share one core → worse than single-threaded.
+    // For multi-threaded benchmarks, we rely on OpenMP's thread affinity.
+    // pin_to_pcore();  // DISABLED for parallel benchmarks
     print_cpu_info();        // Print CPU info
     printf("\n");
 
@@ -166,13 +171,15 @@ int main() {
     int sizes[] = {64, 128, 256, 512, 1024};
 
     // Print table header
-    printf("%-8s | %-8s %-8s | %-8s %-8s | %-8s %-8s | %-8s %-8s | %-8s %-8s | %-10s\n",
+    printf("%-8s | %-8s %-8s | %-8s %-8s | %-8s %-8s | %-8s %-8s | %-8s %-8s | %-8s %-8s | %-10s\n",
            "size", "ijk", "GFLOPS", "ikj", "GFLOPS",
-           "tiled", "GFLOPS", "simd", "GFLOPS", "unroll", "GFLOPS", "best/peak%");
-    printf("%.120s\n",
+           "tiled", "GFLOPS", "par-ikj", "GFLOPS", "par-tiled", "GFLOPS",
+           "simd", "GFLOPS", "best/peak%");
+    printf("%.140s\n",
            "--------------------------------------------------"
            "--------------------------------------------------"
-           "--------------------------------------------------");
+           "--------------------------------------------------"
+           "--------------------");
 
     for (int sz : sizes) {
         int M = sz, N = sz, K = sz;
@@ -182,27 +189,29 @@ int main() {
 
         double ms_ijk = bench_once(M, N, K, A, B, C, gemm_naive_ijk);
         double ms_ikj = bench_once(M, N, K, A, B, C, gemm_naive_ikj);
-        double ms_tiled = bench_tiled(M, N, K, A, B, C, 32, 32, 32);
+        double ms_tiled = bench_tiled(M, N, K, A, B, C, 128, 128, 128);
+        double ms_par_ikj = bench_once(M, N, K, A, B, C, gemm_parallel_ikj, 5);
+        double ms_par_tiled = bench_once(M, N, K, A, B, C, gemm_parallel_tiled, 5);
         double ms_simd = bench_once(M, N, K, A, B, C, gemm_simd);
-        double ms_unroll = bench_once(M, N, K, A, B, C, gemm_simd_unroll);
 
         double gflops_ijk = compute_gflops(sz, sz, sz, ms_ijk);
         double gflops_ikj = compute_gflops(sz, sz, sz, ms_ikj);
         double gflops_tiled = compute_gflops(sz, sz, sz, ms_tiled);
+        double gflops_par_ikj = compute_gflops(sz, sz, sz, ms_par_ikj);
+        double gflops_par_tiled = compute_gflops(sz, sz, sz, ms_par_tiled);
         double gflops_simd = compute_gflops(sz, sz, sz, ms_simd);
-        double gflops_unroll = compute_gflops(sz, sz, sz, ms_unroll);
 
-        // Take best GFLOPS among all implementations for efficiency
-        double best_gflops = std::max({gflops_ijk, gflops_ikj, gflops_tiled, gflops_simd, gflops_unroll});
+        double best_gflops = std::max({gflops_ijk, gflops_ikj, gflops_tiled, gflops_par_ikj, gflops_par_tiled, gflops_simd});
         double efficiency = best_gflops / peak * 100.0;
 
-        printf("%-8d | %-8.2f %-8.2f | %-8.2f %-8.2f | %-8.2f %-8.2f | %-8.2f %-8.2f | %-8.2f %-8.2f | %-9.1f%%\n",
+        printf("%-8d | %-8.2f %-8.2f | %-8.2f %-8.2f | %-8.2f %-8.2f | %-8.2f %-8.2f | %-8.2f %-8.2f | %-8.2f %-8.2f | %-9.1f%%\n",
                sz,
                ms_ijk, gflops_ijk,
                ms_ikj, gflops_ikj,
                ms_tiled, gflops_tiled,
+               ms_par_ikj, gflops_par_ikj,
+               ms_par_tiled, gflops_par_tiled,
                ms_simd, gflops_simd,
-               ms_unroll, gflops_unroll,
                efficiency);
     }
 
