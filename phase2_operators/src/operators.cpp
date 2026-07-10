@@ -95,11 +95,8 @@ void gelu_vector_approx(const float* in, float* out, int N) {
 // Scaled Dot-Product Attention
 // ============================================================
 
-// 外部声明：Phase 1 的 GEMM（链接时绑定）
-extern void gemm_ikj(int M, int N, int K,
-                     const std::vector<float>& A,
-                     const std::vector<float>& B,
-                     std::vector<float>& C);
+// Phase 1 GEMM (declared in gemm_naive.h, linked from phase1_gemm)
+#include "gemm_naive.h"
 
 void scaled_dot_product_attention(
     const std::vector<float>& Q,
@@ -121,7 +118,7 @@ void scaled_dot_product_attention(
 
     // scores = Q(seq×d_k) × K^T(d_k×seq)
     std::vector<float> scores(seq_len * seq_len);
-    gemm_ikj(seq_len, seq_len, d_k, Q, K_T, scores);
+    gemm_naive_ikj(seq_len, seq_len, d_k, Q, K_T, scores);
 
     // 除以 √d_k：缩放因子，防止点积方差过大导致 softmax 饱和
     float scale = 1.0f / std::sqrt(static_cast<float>(d_k));
@@ -136,5 +133,5 @@ void scaled_dot_product_attention(
     // === 第 3 步：output = weights × V ===
     // weights: seq×seq, V: seq×d_v → output: seq×d_v
     output.resize(seq_len * d_v);
-    gemm_ikj(seq_len, d_v, seq_len, weights, V, output);
+    gemm_naive_ikj(seq_len, d_v, seq_len, weights, V, output);
 }

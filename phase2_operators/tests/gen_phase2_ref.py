@@ -1,146 +1,128 @@
-import torch
 import numpy as np
 from pathlib import Path
 
 """
-生成 PyTorch 参考数据，供 C++ 测试对比使用。
-运行：python gen_phase2_ref.py
-输出放在 data/ 目录下
+Generate reference data using pure NumPy (no PyTorch dependency).
+Run: python gen_phase2_ref.py
+Output: data/ directory with binary files
 """
 
 Path("data").mkdir(exist_ok=True)
-
 np.random.seed(42)
 
-# =============================================================
-# 1. Softmax 测试数据
-# =============================================================
+# ============================================================
+# 1. Softmax
+# ============================================================
+def softmax_np(x):
+    x_max = np.max(x)
+    e = np.exp(x - x_max)
+    return e / np.sum(e)
+
 print("=== Generating Softmax references ===")
 
-# 基本测试
 x_basic = np.array([2.0, 1.0, 0.5], dtype=np.float32)
-x_t = torch.tensor(x_basic)
-ref = torch.softmax(x_t, dim=0).numpy()
-print(f"  Input: {x_basic}")
-print(f"  Ref:   {ref}, sum={ref.sum():.6f}")
+ref_basic = softmax_np(x_basic)
+print(f"  Basic: {x_basic} -> {ref_basic}, sum={ref_basic.sum():.6f}")
 
-# 数值稳定性测试（大数）
 x_large = np.array([1000.0, 1000.0, 1000.0], dtype=np.float32)
-ref_large = torch.softmax(torch.tensor(x_large), dim=0).numpy()
-print(f"  Large input ref: {ref_large}")
+ref_large = softmax_np(x_large)
+print(f"  Large: {x_large} -> {ref_large}")
 
-# 全负数测试
 x_neg = np.array([-5.0, -3.0, -1.0], dtype=np.float32)
-ref_neg = torch.softmax(torch.tensor(x_neg), dim=0).numpy()
-print(f"  Negative input ref: {ref_neg}")
+ref_neg = softmax_np(x_neg)
+print(f"  Negative: {x_neg} -> {ref_neg}")
 
-# =============================================================
-# 2. LayerNorm 测试数据
-# =============================================================
+# ============================================================
+# 2. LayerNorm
+# ============================================================
+def layernorm_np(x, gamma, beta, eps=1e-5):
+    mean = np.mean(x)
+    var = np.var(x)
+    return gamma * (x - mean) / np.sqrt(var + eps) + beta
+
 print("\n=== Generating LayerNorm references ===")
 
 x_ln = np.array([1.0, 3.0, 2.0, 6.0], dtype=np.float32)
 gamma = np.ones(4, dtype=np.float32)
 beta = np.zeros(4, dtype=np.float32)
-
-x_t = torch.tensor(x_ln)
-gamma_t = torch.tensor(gamma)
-beta_t = torch.tensor(beta)
-
-# PyTorch layer_norm 需要 normalized_shape 参数
-ref_ln = torch.nn.functional.layer_norm(
-    x_t, (4,), gamma_t, beta_t, eps=1e-5
-).numpy()
-
-print(f"  Input:  {x_ln}")
+ref_ln = layernorm_np(x_ln, gamma, beta)
+print(f"  Input: {x_ln}")
 print(f"  Output: {ref_ln}")
-mean = ref_ln.mean()
-var = ref_ln.var()
-print(f"  Mean={mean:.6f} (should be ~0), Var={var:.6f} (should be ~1)")
+print(f"  Mean={ref_ln.mean():.6f} (expect ~0), Var={ref_ln.var():.6f} (expect ~1)")
 
-# Gamma/Beta 非恒等测试
 gamma2 = np.array([2.0, 1.0, 1.0, 1.0], dtype=np.float32)
 beta2 = np.array([1.0, 0.0, 0.0, 0.0], dtype=np.float32)
 x_ln2 = np.array([2.0, 4.0, 6.0, 8.0], dtype=np.float32)
-ref_ln2 = torch.nn.functional.layer_norm(
-    torch.tensor(x_ln2), (4,),
-    torch.tensor(gamma2), torch.tensor(beta2), eps=1e-5
-).numpy()
+ref_ln2 = layernorm_np(x_ln2, gamma2, beta2)
 print(f"  With gamma/beta: {ref_ln2}")
 
-# =============================================================
-# 3. GELU 测试数据
-# =============================================================
+# ============================================================
+# 3. GELU
+# ============================================================
+def gelu_np(x):
+    from scipy.special import erf
+    return 0.5 * x * (1.0 + erf(x / np.sqrt(2.0)))
+
 print("\n=== Generating GELU references ===")
 
-# 采样点
 x_gelu = np.array([-5.0, -3.0, -2.0, -1.0, -0.5, 0.0, 0.5, 1.0, 2.0, 3.0, 5.0, 10.0],
                   dtype=np.float32)
-ref_gelu = torch.nn.functional.gelu(torch.tensor(x_gelu)).numpy()
-
+ref_gelu = gelu_np(x_gelu)
 print("  x         GELU(x)")
 for xi, ri in zip(x_gelu, ref_gelu):
     print(f"  {xi:8.1f}  {ri:12.6f}")
 
-# 密集采样（用于测试单调性和近似精度）
-x_dense = np.arange(-5.0, 5.01, 0.1, dtype=np.float32)
-ref_dense = torch.nn.functional.gelu(torch.tensor(x_dense)).numpy()
-
-# =============================================================
-# 4. Attention 测试数据
-# =============================================================
+# ============================================================
+# 4. Attention
+# ============================================================
 print("\n=== Generating Attention references ===")
 
 seq_len, d_k, d_v = 3, 4, 4
-torch.manual_seed(42)
-Q = torch.randn(seq_len, d_k)
-K = torch.randn(seq_len, d_k)
-V = torch.randn(seq_len, d_v)
+np.random.seed(42)
+Q = np.random.randn(seq_len, d_k).astype(np.float32)
+K = np.random.randn(seq_len, d_k).astype(np.float32)
+V = np.random.randn(seq_len, d_v).astype(np.float32)
 
-# 手动实现 Attention 作为参考
-scale = d_k ** 0.5
+# Manual attention
+scale = np.sqrt(d_k)
 scores = Q @ K.T / scale
-weights = torch.softmax(scores, dim=1)
-ref_attn = (weights @ V).numpy()
 
-print(f"  Q:\n{Q.numpy()}")
-print(f"  K:\n{K.numpy()}")
-print(f"  V:\n{V.numpy()}")
-print(f"  Scores:\n{scores.numpy()}")
-print(f"  Weights:\n{weights.numpy()}")
-print(f"  Weights row sums: {weights.sum(dim=1).numpy()}")
+# Softmax per row
+weights = np.zeros_like(scores)
+for r in range(seq_len):
+    weights[r] = softmax_np(scores[r])
+
+ref_attn = weights @ V
+
+print(f"  Q:\n{Q}")
+print(f"  K:\n{K}")
+print(f"  V:\n{V}")
+print(f"  Weights row sums: {weights.sum(axis=1)}")
 print(f"  Output:\n{ref_attn}")
 
-# =============================================================
-# 保存二进制文件
-# =============================================================
+# ============================================================
+# Save binary files
+# ============================================================
 print("\n=== Saving binary files ===")
 
-# Softmax
 x_basic.tofile("data/softmax_basic_in.bin")
-ref.tofile("data/softmax_basic_ref.bin")
-
+ref_basic.tofile("data/softmax_basic_ref.bin")
 x_large.tofile("data/softmax_large_in.bin")
 ref_large.tofile("data/softmax_large_ref.bin")
-
 x_neg.tofile("data/softmax_neg_in.bin")
 ref_neg.tofile("data/softmax_neg_ref.bin")
 
-# LayerNorm
 x_ln.tofile("data/layernorm_in.bin")
 ref_ln.tofile("data/layernorm_ref.bin")
 
-# GELU
 x_gelu.tofile("data/gelu_in.bin")
 ref_gelu.tofile("data/gelu_ref.bin")
 
-# Attention
-Q.numpy().astype(np.float32).tofile("data/attn_Q.bin")
-K.numpy().astype(np.float32).tofile("data/attn_K.bin")
-V.numpy().astype(np.float32).tofile("data/attn_V.bin")
+Q.tofile("data/attn_Q.bin")
+K.tofile("data/attn_K.bin")
+V.tofile("data/attn_V.bin")
 ref_attn.astype(np.float32).tofile("data/attn_ref.bin")
 
-# 保存元数据（形状信息）
 with open("data/attn_meta.txt", "w") as f:
     f.write(f"seq_len={seq_len}\n")
     f.write(f"d_k={d_k}\n")
