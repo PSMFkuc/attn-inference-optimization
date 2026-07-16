@@ -1,0 +1,36 @@
+{
+  "nodes": [
+    {
+      "id": "q_proj",
+      "op": "MatMul",
+      "inputs": ["x", "Wq"]
+    },
+    {
+      "id": "k_proj",
+      "op": "MatMul",
+      "inputs": ["x", "Wk"]
+    },
+    {
+      "id": "v_proj",
+      "op": "MatMul",
+      "inputs": ["x", "Wv"]
+    },
+    {
+      "id": "attn_out",
+      "op": "Attention",
+      "inputs": ["q_proj", "k_proj", "v_proj"],
+      "params": {
+        "d_k": 64,
+        "d_v": 64
+      }
+    },
+    {
+      "id": "ln_out",
+      "op": "LayerNorm",
+      "inputs": ["attn_out"],
+      "params": {
+        "eps": 0.00001
+      }
+    }
+  ]
+}
