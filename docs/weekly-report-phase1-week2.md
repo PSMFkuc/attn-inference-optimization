@@ -269,10 +269,7 @@ phase1_gemm/
 
 | 优先级 | 任务 | 预期收益 |
 |--------|------|----------|
-| P0 | 数据打包 (Packing) | SIMD 对齐 + cache 友好，可能 30-50% |
-| P1 | 寄存器分块 (Micro-kernel) | 减少 C 的 load/store，接近 OpenBLAS |
-| P2 | 软件预取 (Prefetch) | 隐藏内存延迟 |
-| P3 | Phase 2: Attention 算子库 | 进入注意力推理框架 |
+| P0 | Phase 2: Attention 算子库 | 进入注意力推理框架 |
 
 ---
 
